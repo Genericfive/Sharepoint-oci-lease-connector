@@ -26,18 +26,6 @@ Run:
 
 '''End Goal'''
 
-SharePoint
-    ↓
-Lease OneDrive OCI Connector
-    ↓
-OCI Object Storage
-    ↓
-Lease-AI
-    ↓
-Canonical JSON
-    ↓
-Processed JSON
-    ↓
-Excel / future PeopleSoft integration
+SharePointLease -> OneDrive OCI Connector -> OCI Object Storage -> Lease-AI -> Canonical JSON -> Processed JSON -> Excel
 
 Lease-AI should read its input lease from OCI Object Storage rather than connecting directly to SharePoint.

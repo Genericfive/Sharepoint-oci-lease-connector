@@ -1,0 +1,11 @@
+.env
+.auth/
+.venv/
+venv/
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+*.pem
+*.key
+.oci/

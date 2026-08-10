@@ -84,7 +84,7 @@ class OneDriveReadOnlyClient:
     def iter_files(self):
         yield from self._walk(
             self.root_item["id"],
-            PurePosixPath(self.root_name),
+            PurePosixPath(),
         )
 
     def _walk(

@@ -40,7 +40,7 @@ class OCIStorage:
 
     @property
     def state_object_name(self) -> str:
-        return self.object_name("_sync/state.json")
+        return "system/sharepoint-sync/state.json"
 
     def load_state(self) -> dict:
         try:

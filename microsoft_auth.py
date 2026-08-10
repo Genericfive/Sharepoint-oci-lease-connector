@@ -1,63 +1,90 @@
+from __future__ import annotations
+
+import json
+from pathlib import Path
+
 import msal
 
 
-class MicrosoftTokenProvider:
-    def __init__(self, auth_mode, tenant_id, client_id, client_secret, token_cache_file):
-        self.auth_mode = auth_mode
+class MicrosoftAuthenticator:
+
+    def __init__(self, tenant_id: str, client_id: str):
         self.tenant_id = tenant_id
         self.client_id = client_id
-        self.client_secret = client_secret
-        self.token_cache_file = token_cache_file
 
-    def get_access_token(self) -> str:
-        authority = f"https://login.microsoftonline.com/{self.tenant_id}"
+        self.cache_dir = Path(".auth")
+        self.cache_dir.mkdir(parents=True, exist_ok=True)
+        self.cache_path = self.cache_dir / "msal_token_cache.json"
 
-        if self.auth_mode == "client_credentials":
-            app = msal.ConfidentialClientApplication(
-                self.client_id,
-                authority=authority,
-                client_credential=self.client_secret,
-            )
-            result = app.acquire_token_for_client(
-                scopes=["https://graph.microsoft.com/.default"]
-            )
-            return self._extract(result)
+        self.cache = msal.SerializableTokenCache()
 
-        cache = msal.SerializableTokenCache()
-        self.token_cache_file.parent.mkdir(parents=True, exist_ok=True)
-        if self.token_cache_file.exists():
-            cache.deserialize(self.token_cache_file.read_text(encoding="utf-8"))
+        if self.cache_path.exists():
+            try:
+                self.cache.deserialize(
+                    self.cache_path.read_text(encoding="utf-8")
+                )
+            except Exception:
+                pass
 
-        app = msal.PublicClientApplication(
-            self.client_id,
-            authority=authority,
-            token_cache=cache,
+        authority = (
+            f"https://login.microsoftonline.com/{self.tenant_id}"
         )
 
-        scopes = ["User.Read", "Files.Read.All"]
+        self.app = msal.PublicClientApplication(
+            client_id=self.client_id,
+            authority=authority,
+            token_cache=self.cache,
+        )
+
+        self.scopes = [
+            "User.Read",
+            "Files.Read.All",
+        ]
+
+    def _save_cache(self):
+        if self.cache.has_state_changed:
+            self.cache_path.write_text(
+                self.cache.serialize(),
+                encoding="utf-8",
+            )
+
+    def get_access_token(self) -> str:
+        accounts = self.app.get_accounts()
+
         result = None
-        accounts = app.get_accounts()
+
         if accounts:
-            result = app.acquire_token_silent(scopes=scopes, account=accounts[0])
+            result = self.app.acquire_token_silent(
+                scopes=self.scopes,
+                account=accounts[0],
+            )
 
         if not result:
-            flow = app.initiate_device_flow(scopes=scopes)
+            flow = self.app.initiate_device_flow(
+                scopes=self.scopes
+            )
+
             if "user_code" not in flow:
-                raise RuntimeError(f"Could not start Microsoft device flow: {flow}")
+                raise RuntimeError(
+                    "Could not start Microsoft authentication: "
+                    + json.dumps(flow, indent=2)
+                )
+
+            print("\nMicrosoft sign-in required")
             print(flow["message"])
-            result = app.acquire_token_by_device_flow(flow)
 
-        if cache.has_state_changed:
-            self.token_cache_file.write_text(cache.serialize(), encoding="utf-8")
+            result = self.app.acquire_token_by_device_flow(flow)
 
-        return self._extract(result)
+        self._save_cache()
 
-    @staticmethod
-    def _extract(result: dict) -> str:
         token = result.get("access_token")
+
         if not token:
             raise RuntimeError(
-                "Microsoft authentication failed: "
-                + result.get("error_description", str(result))
+                result.get(
+                    "error_description",
+                    "Microsoft authentication failed.",
+                )
             )
+
         return token

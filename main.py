@@ -1,58 +1,123 @@
-import logging
+from __future__ import annotations
+
 import sys
 
 from config import Settings
-from microsoft_auth import MicrosoftTokenProvider
+from microsoft_auth import MicrosoftAuthenticator
 from onedrive_client import OneDriveReadOnlyClient
-from oci_storage import OCIStorage
-from sync_service import SyncService
 
 
-def main() -> int:
+def main() -> None:
+    print("=" * 80)
+    print("SHAREPOINT LEASE BROWSER")
+    print("=" * 80)
+
+    settings = Settings.load()
+
+    authenticator = MicrosoftAuthenticator(
+        tenant_id=settings.ms_tenant_id,
+        client_id=settings.ms_client_id,
+    )
+
+    token = authenticator.get_access_token()
+
+    sharepoint = OneDriveReadOnlyClient(
+        access_token=token,
+        shared_folder_url=settings.shared_folder_url,
+    )
+
+    print("\nReading SharePoint folders and files...")
+    print("SharePoint is the source of the lease documents.\n")
+
+    files = list(sharepoint.iter_files())
+
+    if not files:
+        print("No files found.")
+        return
+
+    for index, file in enumerate(files, start=1):
+        print(f"{index:04d} | {file.relative_path}")
+
+    print("\n" + "=" * 80)
+    print(f"Files found: {len(files)}")
+    print("=" * 80)
+
+    while True:
+        choice = input(
+            "\nSelect file number (or Q to quit): "
+        ).strip()
+
+        if choice.lower() == "q":
+            print("Cancelled.")
+            return
+
+        try:
+            selected_number = int(choice)
+
+            if not 1 <= selected_number <= len(files):
+                print(
+                    f"Enter a number between 1 and {len(files)}."
+                )
+                continue
+
+            break
+
+        except ValueError:
+            print("Enter a valid file number.")
+
+    selected_file = files[selected_number - 1]
+
+    print("\nSelected document")
+    print("=" * 80)
+    print(f"Name: {selected_file.name}")
+    print(f"Path: {selected_file.relative_path}")
+    print(f"Size: {selected_file.size:,} bytes")
+    print("=" * 80)
+
+    print("\nReading selected document from SharePoint...")
+    print("No local lease file will be created.")
+
+    response = sharepoint.open_content_stream(
+        selected_file.item_id
+    )
+
     try:
-        settings = Settings.load()
-        logging.basicConfig(
-            level=getattr(logging, settings.log_level, logging.INFO),
-            format="%(asctime)s | %(levelname)s | %(name)s | %(message)s",
-        )
+        document_bytes = response.content
 
-        token = MicrosoftTokenProvider(
-            settings.ms_auth_mode,
-            settings.ms_tenant_id,
-            settings.ms_client_id,
-            settings.ms_client_secret,
-            settings.token_cache_file,
-        ).get_access_token()
+        print("\nSUCCESS")
+        print("=" * 80)
+        print(f"File: {selected_file.name}")
+        print(f"Bytes loaded: {len(document_bytes):,}")
+        print("Document is currently held in memory only.")
+        print("No local PDF was created.")
+        print("=" * 80)
 
-        onedrive = OneDriveReadOnlyClient(
-            token,
-            settings.shared_folder_url,
-        )
+        # Later this will be passed to Lease-AI.
+        #
+        # Example:
+        #
+        # process_lease(
+        #     document_bytes,
+        #     selected_file.name
+        # )
 
-        storage = OCIStorage(
-            settings.oci_auth_mode,
-            settings.oci_config_file,
-            settings.oci_config_profile,
-            settings.oci_namespace,
-            settings.oci_bucket_name,
-            settings.oci_object_prefix,
-        )
+    finally:
+        response.close()
 
-        totals = SyncService(
-            onedrive,
-            storage,
-            settings.mode,
-            settings.skip_unchanged,
-            settings.max_files,
-        ).run()
+    del document_bytes
 
-        print("Completed:", totals)
-        return 0
-
-    except Exception as exc:
-        print(f"ERROR: {exc}", file=sys.stderr)
-        return 1
+    print("\nIn-memory document test completed.")
 
 
 if __name__ == "__main__":
-    raise SystemExit(main())
+    try:
+        main()
+
+    except KeyboardInterrupt:
+        print("\nCancelled.")
+        sys.exit(130)
+
+    except Exception as exc:
+        print("\nCONNECTOR FAILED")
+        print(f"{type(exc).__name__}: {exc}")
+        raise
